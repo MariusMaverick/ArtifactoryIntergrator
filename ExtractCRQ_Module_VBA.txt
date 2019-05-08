@@ -1,0 +1,1831 @@
+'-------------------------------------------------------------------------------
+'
+'VBA Programming by M.Tesselaar on behalf of
+'created 18.07.2016
+'last edit 30.08.2016 : bugfixing on empty columns in input sheet due to merging of cells
+'
+'-------------------------------------------------------------------------------
+
+'-- Routine to import all changes into TEMP sheet and apply first filtering
+'-- subsequent processing all changes to different sheets for different purposes e.g. Change masterplan.
+'--
+
+Public Sub Sunshine_Copy()
+
+Dim sstr  As String, _
+strSaveAs  As String, _
+strUseSaved  As String, _
+strInputFile  As String, _
+strAltInputFile  As String, _
+strOutFile  As String, _
+strTabName  As String, _
+strFileOutTab  As String, _
+strRpFind  As String, _
+strFilterSetting  As String, _
+strFilterCondition  As String, _
+strColKey  As String, _
+strKeyDateAfter As Date, _
+strColName As String
+
+Dim varRange As Variant
+
+Dim i As Long, _
+i2 As Long, _
+j2 As Integer, _
+j As Integer, _
+intColStartSave As Integer, _
+intColKey As Integer, _
+intColStartInput As Integer, _
+intColEndInput As Integer, _
+intRowStartInput As Integer, _
+intRowEndInput As Long, _
+intColStartOut As Integer, _
+intRowStartOut As Integer, _
+intRowOffset As Integer, _
+intColOffset As Integer, _
+intColIndex As Integer, _
+intColDest As Integer, _
+intColDestTotal As Integer, _
+intColCounter As Integer, _
+intColEnd As Integer, _
+intColFindLocation As Integer, _
+intColRFCFindLocation As Integer, _
+intColNamesFindLocation As Integer, _
+intColRUName As Integer, _
+intColRFCNumber As Integer
+
+
+Dim _
+intInputStartRow As Integer, _
+intTempStartRow As Integer, _
+intSaveStartRow As Integer
+
+
+Dim _
+intColSortSave As Integer, _
+intColSortStandard300 As Integer, _
+strSortDirection As String
+intColSortSave = 0
+intColSortStandard300 = 300
+'A = ascending / D = descending
+
+
+Dim strInputColumName As String
+Dim intColCounted
+
+Dim dstrRFCName, dstrRFCNumber As String
+
+'Array to keep column properties
+Dim arrColConfig As Variant
+
+ReDim arrColConfig(0 To 250, 0 To 5)
+'initialize Array fill up with 0
+For i = 0 To UBound(arrColConfig, 1)
+ For j = 0 To UBound(arrColConfig, 2)
+     arrColConfig(i, j) = 0
+ Next
+Next
+
+
+Dim excWkBkConfig As Object, _
+excWkBkInput As Object, _
+excWkShInput As Object, _
+excWkBkOut As Object, _
+excWkShOut As Object, _
+excWkShConfig As Object, _
+excWkShData As Object, _
+excWkShSave As Object, _
+excWkShTemp As Object, _
+excWkShRFCList As Object, _
+excWkShRU As Object, _
+excWkShPARAM As Object, _
+excRngFind As Object, _
+excRngFindNames As Object, _
+excRngFindRFCs As Object, _
+excRngSelect As Object, _
+excRngOut As Object, _
+excCell As Object, _
+excRngSort As Object, _
+excRngSortCol As Object, _
+excRngDelete As Object
+
+Dim _
+arrWorkSheet() As Variant
+
+Dim excRowFound As Long
+
+ThisWorkbook.Application.EnableEvents = False
+ThisWorkbook.Application.Calculation = xlCalculationManual
+
+sstr = ""
+
+Dim myFileCheckDate1
+Dim myFileCheckDate2
+
+Dim goFS: Set goFS = CreateObject("Scripting.FileSystemObject")
+
+
+Set excWkBkConfig = ThisWorkbook
+Set excWkShConfig = excWkBkConfig.Worksheets("CONFIG")
+Set excWkShData = excWkBkConfig.Worksheets("DATA")
+Set excWkShTemp = excWkBkConfig.Worksheets("TEMP")
+Set excWkShSave = excWkBkConfig.Worksheets("SAVE")
+Set excWkShRFCList = excWkBkConfig.Worksheets("RFC Title")
+Set excWkShRU = excWkBkConfig.Worksheets("RU")
+
+
+
+Dim boolName1Found As Boolean, _
+boolName2Found As Boolean
+
+boolName1Found = True
+boolName2Found = True
+
+
+excWkShConfig.Cells(3, 9) = "preparing..."
+strSaveAs = ""
+With excWkShConfig
+    i = 1
+    While i < 40
+        Select Case .Cells(i, 1)
+            Case "INPUTFILE"
+                strInputFile = .Cells(i, 2)
+                Set myFileCheckDate1 = goFS.GetFile(strInputFile)
+                  .Cells(i - 1, 2) = CDate(myFileCheckDate1.DateLastModified)
+            Case "ALTINPUTFILE"
+                strAltInputFile = .Cells(i, 2)
+                Set myFileCheckDate2 = goFS.GetFile(strAltInputFile)
+                If CDate(myFileCheckDate2.DateLastModified) > CDate(myFileCheckDate1.DateLastModified) Then
+                    strInputFile = strAltInputFile
+                End If
+                
+            Case "ALTINPUTFILEUSE"
+                If .Cells(i, 2) = "ON" Then
+                    strInputFile = strAltInputFile
+                    .Cells(i, 2) = "OFF"
+                End If
+                
+
+            Case "OUTPUTTAB"
+                strFileOutTab = .Cells(i, 2)
+            Case "OUTPUTFILE"
+                strOutFile = .Cells(i, 2)
+            Case "OUTPUTCOLSTART"
+                intColStartOut = .Cells(i, 2)
+            Case "INPUTCOLSTART"
+                intColStartInput = .Cells(i, 2)
+            Case "RFC DATE"
+                strColKey = .Cells(i, 2)
+            Case "SUBMITTED AFTER"
+                strKeyDateAfter = CDate(.Cells(i, 2))
+            Case "SAVEAS"
+                strSaveAs = .Cells(i, 2)
+            Case "USESAVEDONLY"
+                strUseSaved = .Cells(i, 2)
+                If strUseSaved <> "YES" Then
+                    .Cells(i, 2) = "YES"
+                End If
+        End Select
+        i = i + 1
+    Wend
+End With
+
+i = 1
+j = 1
+
+
+'search where column information and namelist is to be found on DATA tab
+With excWkShData
+j = 1
+    While j < 40
+        Select Case .Cells(1, j)
+            Case "COLSELECT"
+                intColFindLocation = j
+            Case "NAMELIST"
+                intColNamesFindLocation = j
+            Case "RFCLIST"
+                intColRFCFindLocation = j
+        End Select
+        j = j + 1
+    Wend
+End With
+
+
+'Set up output file
+If strOutFile <> "" Then
+    Set excWkBkOut = Workbooks.Open(strOutFile)
+Else
+    Set excWkBkOut = ThisWorkbook
+End If
+
+Set excWkShOut = excWkBkOut.Worksheets(strFileOutTab)
+
+ThisWorkbook.Application.EnableEvents = False
+ThisWorkbook.Application.Calculation = xlCalculationManual
+
+sstr = ""
+
+
+'collect all control data from sheet DATA
+With excWkShData
+    'look into second column to find destination col number,
+    'if yes, copy to rows below
+    'if not, skip and check next row
+    'first find end of list
+    
+    i = 1
+    While .Cells(i, intColFindLocation) <> ""
+        i = i + 1
+    Wend
+    intColEnd = i - 1
+
+    intColIndex = 0
+    intColOffset = 2
+    intColDestTotal = 0
+    For i = 2 To intColEnd
+        arrColConfig(intColIndex, 0) = 0 'index not used
+        arrColConfig(intColIndex, 1) = .Cells(i, 1) 'colname
+
+        If .Cells(i, 2) > 0 Then
+            arrColConfig(intColIndex, 2) = .Cells(i, 2) 'destination col
+            If intColDestTotal < .Cells(i, 2) Then
+               intColDestTotal = .Cells(i, 2)
+            End If
+        Else
+            arrColConfig(intColIndex, 2) = intColSortStandard300 'reserved column 300 for filtering activities only, will be deleted afterwards etc.
+        End If
+        arrColConfig(intColIndex, 3) = .Cells(i, 3) 'filter on-off
+        arrColConfig(intColIndex, 4) = .Cells(i, 4) 'filter condition
+        arrColConfig(intColIndex, 5) = .Cells(i, 5) 'unused
+        intColIndex = intColIndex + 1
+        
+    Next
+    
+    'capture range where to find the columns and destination column numbers in which to cross check
+    Set excRngFind = .Range(.Cells(intColOffset, intColFindLocation), .Cells(500, intColFindLocation))
+    'capture range where to find the names in which to cross check
+    Set excRngFindNames = .Range(.Cells(intColOffset, intColNamesFindLocation), .Cells(100, intColNamesFindLocation))
+    Set excRngFindRFCs = .Range(.Cells(intColOffset, intColRFCFindLocation), .Cells(4000, intColRFCFindLocation))
+End With
+
+
+'empty the TEMP worksheet completely
+With excWkShTemp
+    
+        Set excRngOut = .Range(.Cells(1, 1), .Cells(30000, intColSortStandard300 + 6))
+        excRngOut.Clear
+End With
+
+Set excRngOut = Nothing
+
+'check if saved data or new data to be used
+'move to input worksheet and find first column in the range specified on the data worksheet
+
+intColStartSave = 1
+
+intInputStartRow = 3
+intSaveStartRow = 1
+intTempStartRow = 2
+
+If strUseSaved <> "YES" Then
+    intRowOffset = intInputStartRow
+    Set excWkBkInput = Workbooks.Open(Filename:=strInputFile, ReadOnly:=True)
+    
+    If strSaveAs <> "" And strInputFile <> strSaveAs Then
+        Application.DisplayAlerts = False
+        excWkBkInput.SaveAs (strSaveAs)
+        Application.DisplayAlerts = True
+    End If
+
+
+    
+    Set excWkShInput = excWkBkInput.Worksheets("Data")
+    intColEndInput = excWkShInput.Cells(3, 299).End(xlToLeft).Column
+   
+   'Clean up SAVED information
+    With excWkBkConfig.Sheets("SAVE")
+
+        'get the last column
+        intColEndInput = .Cells(3, intColSortStandard300).End(xlToLeft).Column
+        Set excRngOut = .Range(.Cells(1, 1), .Cells(50000, intColEndInput))
+        excRngOut.Clear
+    End With
+    'get the last column
+    intColEndInput = excWkShInput.Cells(3, 299).End(xlToLeft).Column
+    
+Else
+    intRowOffset = intSaveStartRow
+    'get the last column but use the correct start row
+    intColEndInput = excWkShSave.Cells(intSaveStartRow, 300).End(xlToLeft).Column
+    Set excWkShInput = excWkShSave
+End If
+
+
+
+If strUseSaved = "YES" Then
+    'get first row for input (the headers)
+    intRowStartInput = intSaveStartRow
+    'get the last row -> if using SAVED, use key column
+    'get the last row -> if using fresh, use 30000
+    intColKey = intGetColumnByName(excWkShSave, strColKey, intSaveStartRow)
+
+    If intColKey <> -1 Then
+        intRowEndInput = intFindRowLast(excWkShSave, intSaveStartRow, "*", intColKey)
+    Else
+        intRowEndInput = 30000
+    End If
+Else
+    intRowStartInput = 3
+    intRowEndInput = 30000
+End If
+
+excWkShConfig.Cells(3, 9) = "cleaning old stuff..."
+
+'clear the OUTPUT worksheet
+With excWkShOut
+        'clean out all active columns
+
+        Set excRngOut = .Range(.Cells(1, 1), .Cells(50000, intColDestTotal))
+        excRngOut.Clear
+
+End With
+Set excRngOut = Nothing
+
+
+
+'show up CONFIG tab
+excWkShConfig.Activate
+
+sstr = "retrieving data..."
+excWkShConfig.Cells(3, 9) = sstr
+
+'Move to the input sheet and prepare to match input columns with the required output
+
+
+With excWkShInput
+    j = 0 'input column counter
+
+    intRowStartOut = 2
+    intColCounted = 0
+
+
+
+    i2 = 0 'array entry counter for required output columns
+    'search as long as there are entries in the array
+
+    While arrColConfig(i2, 1) <> 0
+        j = 0
+        'search as long as there is no match with the input columns
+        While j < intColEndInput And arrColConfig(i2, 1) <> .Cells(intRowOffset, j + 1).Value
+            j = j + 1
+
+        Wend
+
+        'if matching column was found use the entries in the array to copy entire column to the temporary location
+        If j < intColEndInput And .Cells(intRowOffset, j + 1).Value <> "" Then
+            strInputColumName = .Cells(intRowOffset, j + 1).Value
+            'select column for copying
+            Set excRngSelect = excWkShInput.Range(.Cells(intRowOffset, j + 1), .Cells(intRowEndInput, j + 1))
+            strColName = arrColConfig(i2, 1)
+            intColDest = arrColConfig(i2, 2)
+            excWkShConfig.Cells(3, 9) = strInputColumName & ":" & j & " -> " & intColDest
+            'if matching destination column has a number, move to TEMP worksheet to copy the selected column
+            If intColDest > 0 Then
+                intColCounted = intColCounted + 1
+
+                'move to the TEMP worksheet as intermediate output sheet for processing and filtering
+                With excWkShTemp
+                    
+               
+                    .Cells(1, intColDest + 6) = strColName
+     
+                    Set excRngOut = .Range(.Cells(intTempStartRow, intColDest + 6), .Cells(intRowEndInput - intRowStartInput, intColDest + 6))
+                    
+                    ' copy the entire columns at once
+                    Application.DisplayAlerts = False
+                    
+                    excRngSelect.Copy Destination:=excRngOut
+                    
+                    Application.DisplayAlerts = True
+
+                End With
+            End If
+            
+            Set excRngSelect = Nothing
+            Set excRngOut = Nothing
+       
+        
+        End If
+
+
+        i2 = i2 + 1 'go to next entry in array
+    Wend
+End With
+
+'close import file if not saved data is used
+If strUseSaved <> "YES" Then
+    excWkBkInput.Close
+    Set excWkBkInput = Nothing
+End If
+
+' Move to the temp sheet and prepare deletion of old rows
+' get column number where key column name is found e.g. RFC submit date
+With excWkShTemp
+
+
+    intColKey = intGetColumnByName(excWkShTemp, strColKey, intTempStartRow)
+    intColRLM = intGetColumnByName(excWkShTemp, "RP Number", intTempStartRow)
+    intColRFCNumber = intGetColumnByName(excWkShTemp, "RFC Number", intTempStartRow)
+    
+    
+    'NOT WORKING fill with dummy date if submit date empty
+    'If intColRLM <> -1 And intColKey <> -1 And intColRFCNumber <> -1 Then
+    'i = intTempStartRow
+    'While i < 30000 And (.Cells(i, intColRLM) <> "" Or .Cells(i, intColRFCNumber) <> "")
+     '   If .Cells(i, intColKey) = "" Then
+      '      .Cells(i, intColKey) = Date
+'        End If
+  '       i = i + 1
+  '      DoEvents
+   ' Wend
+   ' End If
+    'sort and delete operation on RFC dates (keyfield) if this keyfield was found
+
+
+If intColKey <> -1 Then
+
+    Set excRngSortCol = .Range(.Cells(intTempStartRow + 1, intColKey), .Cells(intRowEndInput - intTempStartRow - 1, intColKey))
+    Set excRngSort = .Range(.Cells(intTempStartRow + 1, 1), .Cells(intRowEndInput - intTempStartRow - 1, intColSortStandard300 + 6))
+
+    Call SortStuff(excRngSort, excRngSortCol, False)
+
+    i = intTempStartRow + 1
+    'If intColRLM <> -1 Then
+    'While i < 30000 And .Cells(i, intColRLM) <> ""
+     '   If .Cells(i, intColKey) = "" Then
+      '      .Cells(i, intColKey) = Date
+         ' End If
+       'i = i + 1
+        'DoEvents
+    'Wend
+    
+    'End If
+        
+        i = intTempStartRow + 1
+    While i < 30000 And CDate(.Cells(i, intColKey)) > strKeyDateAfter
+        i = i + 1
+        DoEvents
+    Wend
+    sstr = "deleting old rows (" & i & ")"
+    excWkShConfig.Cells(3, 9) = sstr
+
+    If i < 30000 Then
+            .Range(.Cells(i, 1), .Cells(30000, intColSortStandard300 + 6)).Delete (xlShiftUp)
+
+    End If
+
+End If
+
+End With
+
+
+'if keycolumn found in temp, use the keycolumn from temp, otherwise use keycolumn from save to determine the last row to be used
+If intColKey <> -1 Then
+  intRowEndInput = intFindRowLast(excWkShTemp, intTempStartRow, "*", intColKey)
+Else
+    intColKey = intGetColumnByName(excWkShSave, strColKey, intSaveStartRow)
+    
+    If intColKey <> -1 Then
+        intRowEndInput = intFindRowLast(excWkShSave, intSaveStartRow, "*", intColKey) + 10
+    Else
+        intRowEndInput = 30000
+    End If
+
+End If
+
+
+
+
+'Move to the temp sheet and prepare filtering
+
+    intRowStartOut = 3
+
+
+    intColCounted = 0
+
+    i2 = 0 'array entry counter for required output columns
+    'search as long as there are entries in the array related to the temp sheet
+    While arrColConfig(i2, 2) <> 0
+
+
+            intColDest = arrColConfig(i2, 2)
+
+
+
+            'if matching destination column has a number, move to TEMP worksheet to copy the selected column
+            If intColDest > 0 Then
+                intColCounted = intColCounted + 1
+                
+                
+With excWkShTemp
+    Set excRngFind = .Range(.Cells(1, 1), .Cells(25000, 350))
+    arrWorkSheet = excRngFind
+End With
+
+                
+                'move to the TEMP worksheet to filter and mark the result (-1 if to be deleted later) as specified in the array
+                With excWkShTemp
+
+
+
+
+
+            
+
+
+                    'is filtering required?
+                    strFilterSetting = arrColConfig(i2, 3)
+                       'show progress
+                    excWkShConfig.Cells(3, 9) = "Filtering on " & strFilterSetting & ":" & arrColConfig(i2, 4) & " - col (" & intColDest + 6 & ") :" & .Cells(1, intColDest + 6)
+                    If strFilterSetting <> "" Then
+                    strFilterCondition = arrColConfig(i2, 4)
+                        excWkShConfig.Cells(3, 10) = "analyzing (" & intRowEndInput & ") ..."
+
+                        
+                        For i = intTempStartRow + 1 To intRowEndInput
+                                
+                                .rows(i).Interior.ColorIndex = 0
+                                
+                                If .Cells(i, 1) <> -1 Then
+                                    'Check on date
+                                    If strFilterSetting = "DATE GT" Then
+                                        'if not empty and convertible into a date proceed, otherwise skip this check
+     
+                                        If .Cells(i, intColDest + 6).Value <> "" And IsDate(.Cells(i, intColDest + 6).Value) Then
+                                            'Skip dates that are smaller than the specified date
+                                            If CDate(.Cells(i, intColDest + 6).Value) < CDate(strFilterCondition) Then
+                                                .Cells(i, 1) = -1
+                                                .rows(i).Interior.ColorIndex = 17
+                                            End If
+                                        End If
+                                    End If
+                                    
+                                    If strFilterSetting = "SORT" Then
+                                        intColSortSave = intColDest + 6
+                                        strSortDirection = strFilterCondition
+                                    End If
+                                                              
+                                    If strFilterSetting = "NOT BLANK" And .Cells(i, intColDest + 6).Value = "" Then
+                                        .Cells(i, 1) = -1
+                                        .rows(i).Interior.ColorIndex = 17
+                                    End If
+                                    
+                                    If strFilterSetting = "NOT" And .Cells(i, intColDest + 6).Value = strFilterCondition Then
+                                        .Cells(i, 1) = -1
+                                        .rows(i).Interior.ColorIndex = 17
+                                    End If
+                                    
+                                    If strFilterSetting = "IS" And .Cells(i, intColDest + 6).Value <> strFilterCondition Then
+                                        .Cells(i, 1) = -1
+                                        .rows(i).Interior.ColorIndex = 17
+                                    End If
+                                
+                                    If strFilterSetting = "HAS" And InStr(1, .Cells(i, intColDest + 6).Value, strFilterCondition, 1) = 0 Then
+                                        .Cells(i, 1) = -1
+                                        .rows(i).Interior.ColorIndex = 17
+                     
+                                    End If
+                                
+                                    If strFilterSetting = "IN RFC LIST" Then
+                                        If excRngFindRFCs.Find(.Cells(i, intColDest + 6).Value) Is Nothing Then
+                                            .Cells(i, 1) = -1
+                                        .rows(i).Interior.ColorIndex = 17
+                                        End If
+                                
+                                    End If
+                                
+                                    If strFilterSetting = "IN NAME LIST1" Or strFilterSetting = "IN NAME LIST2" Then
+                                    boolName1Found = True
+                                    boolName2Found = True
+                                'MsgBox strFilterSetting & " for: " & intColDest + 6 & ":" & i & "   " & (.Cells(i, intColDest + 6).Value)
+                
+                                
+                                        If strFilterSetting = "IN NAME LIST1" And .Cells(i, intColDest + 6).Value = "" Then
+                                            .Cells(i, 2) = -1
+                                                               
+                                        End If
+                                        
+                                        If boolName1Found And strFilterSetting = "IN NAME LIST1" Then
+                                            If excRngFindNames.Find(.Cells(i, intColDest + 6).Value) Is Nothing Then
+                                                .Cells(i, 2) = -1
+                                              
+                                            End If
+                                        End If
+                                    
+                                        If strFilterSetting = "IN NAME LIST2" And .Cells(i, intColDest + 6).Value = "" Then
+                                            .Cells(i, 3) = -1
+                                                               
+                                        
+                                        End If
+                                    
+                                        If boolName2Found And strFilterSetting = "IN NAME LIST2" Then
+                                            If excRngFindNames.Find(.Cells(i, intColDest + 6).Value) Is Nothing Then
+                                                .Cells(i, 3) = -1
+                                             
+                                            End If
+                                        End If
+           
+                  
+                                    End If
+                                
+                                
+                                End If
+            
+                        DoEvents
+                        Next
+
+                        excWkShConfig.Cells(3, 10) = i
+                        For i = intTempStartRow + 1 To intRowEndInput
+
+
+                                
+                            If (.Cells(i, 2) = -1) And (.Cells(i, 3) = -1) Then
+                                .Cells(i, 1) = -1
+                                .rows(i).Interior.ColorIndex = 17
+                
+                
+                            End If
+                        Next
+                  
+                        
+                    End If
+                    'clean up this entire 'spare column' for filtering only activities
+                    If intColDest = 300 Then
+
+                        Set excRngOut = .Range(.Cells(1, intColDest), .Cells(50000, intColDest))
+                        excRngOut.Clear
+            
+                         Set excRngOut = Nothing
+                    End If
+                End With
+            End If
+            
+            Set excRngSelect = Nothing
+            Set excRngOut = Nothing
+       
+        
+              
+
+        
+        i2 = i2 + 1 'go to next entry in array
+    Wend
+
+
+
+
+'convert RP name to RFC name in TEMP sheet
+
+
+
+
+
+
+
+        sstr = "deleting from " & intRowEndInput & " rows..."
+        excWkShConfig.Cells(3, 9) = sstr
+
+With excWkShTemp
+    Set excRngSortCol = .Range(.Cells(intTempStartRow + 1, 1), .Cells(intRowEndInput, 1))
+    Set excRngSort = .Range(.Cells(intTempStartRow + 1, 1), .Cells(intRowEndInput, intColSortStandard300 + 6))
+
+
+
+
+    Call SortStuff(excRngSort, excRngSortCol, False)
+
+
+'clean out the range with all -1
+
+
+    i2 = intFindRowLast(excWkShTemp, intTempStartRow + 1, -1, 1)
+
+
+    If i2 <> -1 Then
+        excWkShConfig.Cells(3, 10) = i2
+        .Range(.Cells(intTempStartRow + 1, 1), .Cells(i2, intColSortStandard300 + 6)).Delete (xlShiftUp)
+    Else
+        excWkShConfig.Cells(3, 10) = "no filter"
+    End If
+
+'if keycolumn found in temp, use to determine the last row to be used
+    intColKey = intGetColumnByName(excWkShTemp, strColKey, intTempStartRow)
+
+    If intColKey <> -1 Then
+        intRowEndInput = intFindRowLast(excWkShTemp, intTempStartRow, "*", intColKey)
+    Else
+        intRowEndInput = 30000
+    End If
+
+
+
+    'sort if sorting was specified
+    
+    If intColSortSave <> 0 Then
+            Set excRngSortCol = .Range(.Cells(intTempStartRow + 1, intColSortSave), .Cells(intRowEndInput, intColSortSave))
+            Set excRngSort = .Range(.Cells(intTempStartRow + 1, 1), .Cells(intRowEndInput, intColSortStandard300 + 6))
+
+            Call SortStuff(excRngSort, excRngSortCol, strSortDirection = "A")
+
+    End If
+
+    intRowStartOut = 2
+
+sstr = "COMPLETED SUCCESSFULLY" & vbCrLf
+
+    'copy from Temp to specified Output sheet, skip the sorting column if no destination column number was assigned.
+    For j = 1 To intColCounted
+        If arrColConfig(j - 1, 1) <> 0 And arrColConfig(j - 1, 2) <> intColSortStandard300 Then
+        'save in output
+        excWkShConfig.Cells(3, 9) = arrColConfig(j - 1, 1) & " - " & arrColConfig(j - 1, 2)
+
+        Set excRngSelect = excWkShTemp.Range(.Cells(intTempStartRow + 1, 6 + arrColConfig(j - 1, 2)), .Cells(intTempStartRow + intRowEndInput, 6 + arrColConfig(j - 1, 2)))
+
+        With excWkShOut
+            .Cells(1, arrColConfig(j - 1, 2) + intColStartOut - 1) = arrColConfig(j - 1, 1)
+            Set excRngOut = .Range(.Cells(intRowStartOut, arrColConfig(j - 1, 2)), .Cells(intRowEndInput, arrColConfig(j - 1, 2)))
+            excRngSelect.Copy Destination:=excRngOut
+        End With
+        End If
+        
+sstr = sstr & j & ": col-" & arrColConfig(j - 1, 2) & ":" & arrColConfig(j - 1, 1) & vbCrLf
+   excWkShOut.Activate
+        'keep saved list for future use
+        If strUseSaved <> "YES" And arrColConfig(j - 1, 1) <> 0 Then
+            With excWkShSave
+                .Cells(1, j + intColStartSave - 1) = arrColConfig(j - 1, 1)
+                Set excRngOut = .Range(.Cells(intSaveStartRow + 1, j + arrColConfig(j - 1, 2)), .Cells(intRowEndInput, arrColConfig(j - 1, 2)))
+                excRngSelect.Copy Destination:=excRngOut
+                
+            End With
+        End If
+    DoEvents
+
+    Next
+    
+
+    
+End With
+    
+    excWkShConfig.Activate
+    sstr = "Updating RFC Titles"
+    excWkShConfig.Cells(3, 9) = sstr
+'update RP Name with RFC Name , adapt RP names if first time Saved was filled
+
+If strUseSaved <> "YES" Then
+    Call SubstituteRPtoRFCtitle(excWkShSave, excWkShRFCList, intRowEndInput)
+    Call SubstituteRPNametoRUName(excWkShSave, excWkShRU, intRowEndInput)
+End If
+ThisWorkbook.Application.EnableEvents = True
+ThisWorkbook.Application.Calculation = xlCalculationAutomatic
+excWkShConfig.Cells(3, 9) = "COMPLETED"
+
+Set excWkShIn = Nothing
+Set excWkShOut = Nothing
+Set excWkBkTarget = Nothing
+
+
+
+
+
+End Sub
+Public Sub InformScreen(strText As String, ByRef excWkShOutput As Object)
+    With excWkShOutput
+        .Cells(3, 9) = strText
+    End With
+End Sub
+
+Private Function intGetColumnByName(ByVal excWkSh As Object, ByVal strSearchName As String, ByVal intSearchRow As Integer)
+Dim j As Integer
+j = 1
+
+With excWkSh
+    If strSearchName = "-" Then
+        While j < 10000 And .Cells(intSearchRow, j) <> ""
+            j = j + 1
+            DoEvents
+        Wend
+
+    
+    Else
+        While j < 10000 And .Cells(intSearchRow, j) <> strSearchName
+            j = j + 1
+    
+            DoEvents
+        Wend
+    
+    End If
+    If j < 10000 Then
+        intGetColumnByName = j
+    Else
+        intGetColumnByName = -1
+    End If
+
+End With
+
+End Function
+Private Function intFindRowLast(ByVal excWkSh As Object, ByVal intStartRow As Integer, ByVal strFindText As String, intColNo As Integer) As Long
+
+Dim i As Long
+Dim excRngFind As Object
+i = intStartRow
+
+
+
+With excWkSh
+    
+    
+    'skip all rows with specific content until last one
+    If strFindText <> "" And strFindText <> "*" Then
+    Set excRngFind = .Range(.Cells(intStartRow, intColNo), .Cells(30000, intColNo))
+        
+        If Not excRngFind.Find(strFindText) Is Nothing Then
+            While i < 50000 And .Cells(i, intColNo) = strFindText
+        
+                i = i + 1
+            Wend
+        Else
+            i = 50000
+        End If
+    End If
+    
+    
+    'skip all empty rows until the last one
+    
+    If strFindText = "" Then
+        While i < 50000 And .Cells(i, intColNo) = ""
+            i = i + 1
+        Wend
+
+    End If
+  
+    'skip rows that are not empty to find last non empty row
+    
+    If strFindText = "*" Then
+        While i < 50000 And .Cells(i, intColNo) <> ""
+            i = i + 1
+        Wend
+
+    End If
+  
+  
+    If i < 50000 Then
+        intFindRowLast = i - 1
+    Else
+        intFindRowLast = -1
+    End If
+
+End With
+
+End Function
+
+Private Function intFindRowFirst(ByVal excWkSh As Object, ByVal intStartRow As Integer, ByVal strFindText As String, intColNo As Integer) As Long
+
+Dim i As Long
+Dim excRngFind As Object
+i = intStartRow
+
+
+
+With excWkSh
+    
+    
+    'skip all rows with specific content until first one
+    If strFindText <> "" And strFindText <> "*" Then
+    Set excRngFind = .Range(.Cells(intStartRow, intColNo), .Cells(30000, intColNo))
+        
+        If Not excRngFind.Find(strFindText) Is Nothing Then
+            While i < 50000 And .Cells(i, intColNo) <> strFindText
+        
+                i = i + 1
+            Wend
+        Else
+            i = 50000
+        End If
+    End If
+    
+    
+    'skip all empty rows until the first one
+    
+    If strFindText = "" Then
+        While i < 50000 And .Cells(i, intColNo) <> ""
+            i = i + 1
+        Wend
+
+    End If
+  
+    'skip rows that are not empty to find first non empty row
+    
+    If strFindText = "*" Then
+        While i < 50000 And .Cells(i, intColNo) = ""
+            i = i + 1
+        Wend
+
+    End If
+  
+  
+    If i < 50000 Then
+        intFindRowFirst = i
+    Else
+        intFindRowFirst = -1
+    End If
+
+End With
+
+End Function
+Private Function intFindRowApproxDate(ByVal excWkSh As Object, ByVal intStartRow As Integer, ByVal dateTargetDate As Date, intColNo As Integer) As Double
+'important, this function needs an ascending sorted inputcolumn
+
+
+Dim i As Long
+
+Dim arrDate() As Variant
+
+
+Dim excRngFind As Range
+
+If intStartRow < 2 Then
+    intStartRow = 2
+End If
+
+i = intStartRow - 1
+
+With excWkSh
+   'check if it is a date we are looking for
+    If IsDate(dateTargetDate) Then
+        
+        Set excRngFind = .Range(.Cells(intStartRow, intColNo), .Cells(50000, intColNo))
+        'important, the arrEIS will be 2-dimensional even if only single column is copied
+        arrDate = excRngFind.Value
+            
+            'search for first date in row
+            While Not IsDate(arrDate(i, 1)) And i < UBound(arrDate, 1)
+            
+                i = i + 1
+            Wend
+            
+            While i < UBound(arrDate, 1) And CDate(arrDate(i, 1)) < dateTargetDate And arrDate(i, 1) <> ""
+    
+ 
+                i = i + 1
+                DoEvents
+            Wend
+
+    End If
+  
+  If i < UBound(arrDate, 1) Then
+        intFindRowApproxDate = i + 1
+  Else
+        intFindRowApproxDate = -1
+  End If
+
+
+End With
+
+End Function
+Private Function intFindRowFirstDate(ByVal excWkSh As Object, ByVal intStartRow As Integer, ByVal dateFindDate As Date, intColNo As Integer) As Long
+
+Dim i As Long
+Dim excRngFind As Object
+
+If intStartRow < 1 Then
+    intStartRow = 1
+End If
+
+i = intStartRow
+
+
+
+With excWkSh
+    While Not IsDate(.Cells(i, intColNo)) And i < 5000
+    i = i + 1
+    DoEvents
+    Wend
+    
+    
+    'skip all rows with specific content until first one
+    If IsDate(dateFindDate) Then
+    Set excRngFind = .Range(.Cells(intStartRow, intColNo), .Cells(50000, intColNo))
+   
+        If Not excRngFind.Find(dateFindDate) Is Nothing Then
+            While i < 50000 And CDate(.Cells(i, intColNo).Value) <> dateFindDate
+
+                i = i + 1
+            Wend
+        Else
+            i = 50000
+        End If
+    End If
+    
+ 
+  
+    If i < 50000 Then
+        intFindRowFirstDate = i
+    Else
+        intFindRowFirstDate = -1
+    End If
+
+End With
+
+End Function
+
+Private Function intGetFirstNonemptyRow(ByVal excWkSh As Object, ByVal intSearchCol As Integer)
+
+Dim i As Long
+i = 1
+
+With excWkSh
+    While i < 50000 And .Cells(i, intSearchCol) = ""
+        i = i + 1
+ 
+        DoEvents
+    Wend
+    If i < 50000 Then
+        intGetFirstNonemptyRow = i
+    Else
+        intGetFirstNonemptyRow = -1
+    End If
+
+End With
+
+
+End Function
+
+Private Sub SubstituteRPtoRFCtitle(ByVal excWkSh As Object, ByVal excWkShRFCList As Object, ByVal intTotalRows As Long)
+'Dim dicRFC As Object
+Dim i As Long
+
+Dim intFirstRow As Integer, _
+intRPNameCol As Integer, _
+intRFCStatusCol As Integer, _
+intRFCNoCol As Integer
+
+Dim dirRfC As New Dictionary
+Set dicRFC = CreateObject("Scripting.Dictionary")
+
+dicRFC.RemoveAll
+
+With excWkShRFCList
+i = 1
+    While .Cells(i, 1) <> "" And i < 50000
+
+        If Not dicRFC.Exists(.Cells(i, 1).Value) Then
+            dstrRFCNumber = .Cells(i, 1)
+            dstrRFCName = .Cells(i, 2)
+            dicRFC.Add dstrRFCNumber, dstrRFCName
+            'MsgBox i & ":  " & dstrRFCNumber & "  " & dstrRFCName & "  " & dicRFC.Count & "  " & dicRFC(dstrRFCNumber)
+        
+        End If
+        i = i + 1
+
+        DoEvents
+    Wend
+
+' MsgBox i & ":  " & dicRFC.Count & "  " & dicRFC("CRQ000000097466")
+
+End With
+
+
+intFirstRow = intGetFirstNonemptyRow(excWkSh, 2)
+
+If intFirstRow <> -1 Then
+    intRPNameCol = intGetColumnByName(excWkSh, "RP Summary", intFirstRow)
+    intRFCNoCol = intGetColumnByName(excWkSh, "RFC Number", intFirstRow)
+    intRFCStatusCol = intGetColumnByName(excWkSh, "RFC Current Status", intFirstRow)
+End If
+
+
+
+
+If intFirstRow <> -1 And intRPNameCol <> -1 And intRFCNoCol <> -1 Then
+
+'skip header row from now on
+intFirstRow = intFirstRow + 1
+    
+    With excWkSh
+    i = intFirstRow
+        While i < intTotalRows
+                If dicRFC.Exists(.Cells(i, intRFCNoCol).Value) Then
+                    .Cells(i, intRPNameCol) = .Cells(i, intRPNameCol) & "#" & dicRFC(.Cells(i, intRFCNoCol).Value) & " [" & .Cells(i, intRFCStatusCol) & "]"
+                Else
+                    .Cells(i, intRPNameCol) = .Cells(i, intRPNameCol) & "#" & .Cells(i, intRPNameCol)
+                
+                End If
+
+            i = i + 1
+            DoEvents
+        Wend
+    End With
+End If
+
+
+End Sub
+
+Private Sub SubstituteRPNametoRUName(ByVal excWkSh As Object, ByVal excWkShRUNames As Object, ByVal intTotalRows As Long)
+'Dim dicRFC As Object
+Dim i As Long
+
+Dim _
+intFirstRow As Integer, _
+intRPNumCol As Integer, _
+intRPNameCol As Integer, _
+intRFCNameCol As Integer
+
+Dim dstrRPNumber As String, _
+dstrRPName As String, _
+dstrRFCName As String
+
+Dim dicRPNames As New Dictionary
+Set dicRPNames = CreateObject("Scripting.Dictionary")
+
+dicRPNames.RemoveAll
+
+With excWkShRUNames
+i = 1
+    While .Cells(i, 1) <> "" And i < 50
+
+        If Not dicRPNames.Exists(.Cells(i, 1).Value) Then
+            dstrRPNumber = .Cells(i, 1)
+            dstrRPName = .Cells(i, 2)
+            dicRPNames.Add dstrRPNumber, dstrRPName
+            'MsgBox i & ":  " & dstrRPNumber & "  " & dstrRPName & "  " & dicRPNames.Count & "  " & dicRPNames(dstrRPNumber)
+
+        End If
+        i = i + 1
+
+        DoEvents
+    Wend
+
+' MsgBox i & ":  " & dicRFC.Count & "  " & dicRFC("CRQ000000097466")
+
+End With
+
+
+intFirstRow = intGetFirstNonemptyRow(excWkSh, 1)
+
+If intFirstRow <> -1 Then
+    intRPNumCol = intGetColumnByName(excWkSh, "RP Number", intFirstRow)
+    intRPNameCol = intGetColumnByName(excWkSh, "RP requestor", intFirstRow)
+    intRFCNameCol = intGetColumnByName(excWkSh, "RFC Name", intFirstRow)
+End If
+
+
+
+
+If intFirstRow <> -1 And intRPNumCol <> -1 And intRPNameCol <> -1 And intRFCNameCol <> -1 Then
+
+'skip header row from now on
+intFirstRow = intFirstRow + 1
+    
+    With excWkSh
+    i = intFirstRow
+        While i < intTotalRows
+            If dicRPNames.Exists(.Cells(i, intRPNumCol).Value) Then
+  
+                .Cells(i, intRPNameCol) = dicRPNames(.Cells(i, intRPNumCol).Value)
+                .Cells(i, intRFCNameCol) = dicRPNames(.Cells(i, intRPNumCol).Value)
+     
+            End If
+
+            i = i + 1
+            DoEvents
+        Wend
+    End With
+End If
+
+
+End Sub
+
+Public Sub SetRFCEfforts(ByVal excWkShCapac As Object, ByVal excWkShPARAM As Object)
+Dim _
+intEffortCol As Integer, _
+intRFCNameCol As Integer, _
+intRFCEmergenCol As Integer, _
+intRFCINSelectCol As Integer, _
+intRPNumberCol As Integer, _
+dblRFCEffort As Double, _
+dblRFCNormal As Double, _
+dblRFCEcab  As Double, _
+dblRFCIntern    As Double, _
+dblRFCInternIN    As Double, _
+dblRFCFud As Double, _
+dblRFCOffset As Double
+
+Dim _
+i As Double
+
+With excWkShPARAM
+    
+    dblRFCNormal = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Effort Normal", 1), 2)
+    dblRFCEcab = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Effort ECAB", 1), 2)
+    dblRFCIntern = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Effort ICT Internal", 1), 2)
+    dblRFCInternIN = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Effort ICT Internal - IN", 1), 2)
+    dblRFCFud = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Effort FUD", 1), 2)
+    dblRFCOffset = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Offset", 1), 2)
+End With
+
+
+' calculate RFC total effort and store as additional column in the list
+'
+intEffortCol = intGetColumnByName(excWkShCapac, "RFC Effort", 1)
+
+If intEffortCol = -1 Then
+    intEffortCol = intGetColumnByName(excWkShCapac, "-", 1)
+    excWkShCapac.Cells(1, intEffortCol) = "RFC Effort"
+End If
+
+intRFCNameCol = intGetColumnByName(excWkShCapac, "RP Summary", 1)
+intRFCEmergenCol = intGetColumnByName(excWkShCapac, "RFC Emergency", 1)
+intRFCINSelectCol = intGetColumnByName(excWkShCapac, "RFC Product Categorization Tier 1", 1)
+intRPNumberCol = intGetColumnByName(excWkShCapac, "RP Number", 1)
+
+
+
+
+With excWkShCapac
+
+
+
+    i = 2
+
+    While .Cells(i, intRFCNameCol) <> "" And i < 25000
+        dblRFCEffort = dblRFCNormal
+        
+        'ICT Internal
+        
+        If InStr(1, .Cells(i, intRFCNameCol), "nterna") <> 0 Then
+            If InStr(1, .Cells(i, intRFCINSelectCol), "IN") <> 0 Then
+                dblRFCEffort = dblRFCInternIN
+             
+            Else
+                dblRFCEffort = dblRFCIntern
+            End If
+        End If
+        
+        'FUD
+        
+        If InStr(1, .Cells(i, intRFCNameCol), "(FuD)") <> 0 Or InStr(1, .Cells(i, intRFCNameCol), "(FUD)") <> 0 Then
+            dblRFCEffort = dblRFCFud
+        End If
+        
+        'Emergency ECAB
+        
+        If InStr(1, .Cells(i, intRFCEmergenCol), "mergenc") <> 0 Then
+            dblRFCEffort = dblRFCEcab
+        
+        End If
+        
+        'calculate effort for multiple RFCs per RLM
+        dblRFCEffort = dblRFCEffort / Application.WorksheetFunction.CountIf(.Range(.Cells(1, intRPNumberCol), .Cells(25000, intRPNumberCol)), .Cells(i, intRPNumberCol))
+        'set minimum
+        If dblRFCEffort < dblRFCOffset Then
+            dblRFCEffort = dblRFCOffset
+        End If
+        
+        .Cells(i, intEffortCol) = dblRFCEffort
+        
+        i = i + 1
+    
+    Wend
+
+
+
+End With
+
+End Sub
+Public Sub teststub()
+Dim _
+excwksh1 As Object, _
+excwksh2 As Object
+
+Set excwksh1 = ThisWorkbook.Sheets("CAPACITYPLAN")
+Set excwksh2 = ThisWorkbook.Sheets("Lists")
+Set excwksh3 = ThisWorkbook.Sheets("TeamRFCs")
+Set excwksh4 = ThisWorkbook.Sheets("DateRange")
+Set excwksh5 = ThisWorkbook.Sheets("PARAM")
+
+'Call NameTranslateCAPAC(excwksh1, excwksh2)
+'Call SetRFCEfforts(excwksh1, excwksh5)
+'Call CalculateTeamRFCs(excwksh1, excwksh3, excwksh5)
+Call CalculateDateRangeRFCs(excwksh1, excwksh4, excwksh5)
+
+
+
+End Sub
+Public Sub CalculateDateRangeRFCs(ByVal excWkShCapac, ByVal excWkShDateRange As Object, ByVal excWkShPARAM As Object)
+
+Dim _
+i As Integer, _
+j As Integer, _
+k As Integer, _
+intMaxDates As Integer, _
+intMaxDateRange As Integer, _
+capacStartRow As Integer, _
+dlbRFCDayEffort As Double, _
+currentYear As Integer, _
+intEISCount As Integer, _
+intSubmitCount As Integer, _
+dateStartDate As Date, _
+dateEndDate As Date, _
+intRFCDays As Integer, _
+intTmpRFCDays As Integer, _
+dateTmpDate As Date, _
+intEndRow As Integer, _
+intStartRow As Integer, _
+intCapacStartRow As Integer, _
+intCapacEndRow As Integer
+
+Dim arrEffort() As Variant
+Dim arrCapacEffort() As Variant
+
+Dim _
+excRngFind As Object, _
+excRngSort As Object, _
+excRngSortCol As Object, _
+excRngEIS As Object, _
+excRngSubmit As Object, _
+arrRange As Object, _
+excRngEffort As Object
+
+Dim _
+intEISColInput As Integer, _
+intEISColOutput As Integer, _
+intSubmitColInput As Integer, _
+intSubmitColOutput As Integer, _
+intEffortColInput As Integer, _
+intEffortColOutput As Integer, _
+intDateRow As Long
+
+'grab external paremeters
+
+With excWkShPARAM
+    
+    intMaxDates = 365 * .Cells(intFindRowFirst(excWkShPARAM, 1, "MaxYears", 1), 2)
+    intRFCDays = CInt(.Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Worktime", 1), 2))
+    dateStartDate = .Cells(intFindRowFirst(excWkShPARAM, 1, "Start Date", 1), 2)
+    
+    If Year(CDate(dateStartDate + intMaxDates)) >= 2024 Then
+        intMaxDates = 365 * (2024 - Year(CDate(dateStartDate)))
+    End If
+
+End With
+
+intEISCount = 0
+intSubmitCount = 0
+        
+'avoid automatic calculations
+ThisWorkbook.Application.EnableEvents = False
+ThisWorkbook.Application.Calculation = xlCalculationManual
+        
+        
+With excWkShDateRange
+
+'find row with the starting date
+
+intStartRow = intFindRowFirstDate(excWkShDateRange, 1, dateStartDate, 1)
+    'clean up and initialize the output sheet
+
+    Set excRngFind = .Range(.Cells(intStartRow, 1), .Cells(50000, 500))
+    excRngFind.ClearContents
+
+    .Cells(1, 1) = "Date"
+    .Cells(1, 2) = "RFC Effort"
+    .Cells(1, 3) = "RFC Submit"
+    .Cells(1, 4) = "RFC EIS"
+
+    'set up the dates to be used from 2015 to 2014
+    intMaxDateRange = 365 * (2024 - 2015)
+    For i = intStartRow To intMaxDateRange
+        .Cells(i, 1) = CDbl(CDate(DateSerial(2015, 1, i - 1)))
+        .Cells(i, 2) = 0
+ 
+    Next
+
+    'get the output columns by name
+    intEISColOutput = intGetColumnByName(excWkShDateRange, "RFC EIS", 1)
+    intSubmitColOutput = intGetColumnByName(excWkShDateRange, "RFC Submit", 1)
+    intEffortColOutput = intGetColumnByName(excWkShDateRange, "RFC Effort", 1)
+End With
+
+
+
+With excWkShCapac
+    'get the input columns by name
+    intEISColInput = intGetColumnByName(excWkShCapac, "RP EIS Date", 1)
+    intSubmitColInput = intGetColumnByName(excWkShCapac, "RFC Submit Date", 1)
+    intEffortColInput = intGetColumnByName(excWkShCapac, "RFC Effort", 1)
+
+    'sort by EIS date
+    Set excRngSort = .Range(.Cells(2, 1), .Cells(25000, 250))
+    Set excRngSortCol = .Range(.Cells(2, intEISColInput), .Cells(25000, intEISColInput))
+    Call SortStuff(excRngSort, excRngSortCol, True)
+    
+    
+    For i = 2 To intFindRowLast(excWkShCapac, 2, "*", intSubmitColInput)
+        'correct the input submit dates by stripping of hour information
+        dateTmpDate = .Cells(i, intSubmitColInput)
+        If .Cells(i, intSubmitColInput) <> "" Then
+            .Cells(i, intSubmitColInput) = CDbl(CDate(DateSerial(Year(dateTmpDate), Month(dateTmpDate), Day(dateTmpDate))))
+        End If
+        
+        'correct the input EIS dates the same way just to be on the safe side
+        dateTmpDate = .Cells(i, intEISColInput)
+        If dateTmpDate = .Cells(i, intEISColInput) <> "" Then
+            .Cells(i, intEISColInput) = CDbl(CDate(DateSerial(Year(dateTmpDate), Month(dateTmpDate), Day(dateTmpDate))))
+        End If
+    Next
+    
+    'set up the range where to find occurrences of EIS dates in the input sheet
+    intLastRow = intFindRowLast(excWkShCapac, 2, "*", intEISColInput)
+    Set excRngEIS = .Range(.Cells(1, intEISColInput), .Cells(intLastRow, intEISColInput))
+    
+    'set up the range where to find occurences of SUBMIT dates in the input sheet
+    intLastRow = intFindRowLast(excWkShCapac, 2, "*", intSubmitColInput)
+    Set excRngSubmit = .Range(.Cells(1, intSubmitColInput), .Cells(intLastRow, intSubmitColInput))
+
+    'set up the range where to find efforts in the input sheet
+    intLastRow = intFindRowLast(excWkShCapac, 2, "*", intEffortColInput)
+    Set excRngEffort = .Range(.Cells(1, intEffortColInput), .Cells(intLastRow, intEffortColInput))
+
+'MsgBox LBound(arrCapacEffort, 1) & "  " & UBound(arrCapacEffort, 1)
+'Stop
+End With
+
+    
+
+With excWkShDateRange
+    
+    Set arrRange = .Range(.Cells(1, 1), .Cells(intMaxDateRange, 10))
+    
+    arrEffort = arrRange
+    
+    'walk through the list of dates in the output sheet
+    intStartRow = intFindRowFirstDate(excWkShDateRange, 2, dateStartDate, 1)
+    
+    For i = intStartRow To UBound(arrEffort, 1)
+    
+    arrEffort(i, intEISColOutput) = Application.WorksheetFunction.CountIf(excRngEIS, "=" & CDbl(CDate(.Cells(i, 1))))
+    arrEffort(i, intSubmitColOutput) = Application.WorksheetFunction.CountIf(excRngSubmit, "=" & CDbl(CDate(.Cells(i, 1))))
+
+    
+    
+    '.Cells(i, intEISColOutput) = Application.WorksheetFunction.CountIf(excRngEIS, "=" & CDbl(CDate(.Cells(i, 1))))
+    '.Cells(i, intSubmitColOutput) = Application.WorksheetFunction.CountIf(excRngSubmit, "=" & CDbl(CDate(.Cells(i, 1))))
+
+    Next
+
+End With
+  
+  arrRange = arrEffort
+  
+With excWkShCapac
+    arrCapacEffort = excRngEffort
+        
+    intCapacStartRow = intFindRowApproxDate(excWkShCapac, 2, dateStartDate, intEISColInput)
+    
+    dateEndDate = CDate(dateStartDate + intMaxDates)
+    
+    intCapacEndRow = intFindRowApproxDate(excWkShCapac, 2, dateEndDate, intEISColInput) - 1
+
+    intDateRow = 1
+    For i = intCapacStartRow To intCapacEndRow
+        
+        intDateRow = intFindRowFirstDate(excWkShDateRange, intDateRow - 1, .Cells(i, intEISColInput), 1)
+   
+        If intDateRow <> -1 Then
+  
+            If intDateRow - intStartRow < intRFCDays Then
+                intTmpRFCDays = intDateRow - intStartRow + 1
+            Else
+                intTmpRFCDays = intRFCDays
+            End If
+
+
+       
+            For k = intDateRow To intDateRow - intTmpRFCDays + 1 Step -1
+ 
+                arrRange.Cells(k, intEffortColOutput) = (arrRange.Cells(k, intEffortColOutput)) + (7 / 5) * (arrCapacEffort(i, 1) / intRFCDays)
+            Next k
+
+        End If
+        
+        DoEvents
+
+    Next i
+    
+
+
+End With
+
+
+
+
+
+
+
+
+        ThisWorkbook.Application.EnableEvents = True
+        ThisWorkbook.Application.Calculation = xlCalculationAutomatic
+
+
+End Sub
+
+
+Public Sub CalculateTeamRFCs(ByVal excWkShCapac, ByVal excWkShTeamRFCs As Object, ByVal excWkShPARAM As Object)
+Dim _
+i As Integer, _
+j As Integer, _
+k As Integer, _
+capacStartRow As Integer
+
+
+Dim _
+excRngSort As Object, _
+excRngSortCol As Object, _
+excRngSortCol2 As Object
+
+
+Dim _
+excRangeFind As Object, _
+dateCalenderStart As Date, _
+dateRunningMonth As Date, _
+dateEIS As Date, _
+dateStartWork As Date, _
+intColName As Integer, _
+intMonthRange As Integer, _
+intStartRow As Integer, _
+intEISCol As Integer, _
+intCapacNameCol As Integer, _
+intEffortCol As Integer, _
+dblEffort1 As Double, _
+dblEffort2 As Double, _
+intRFCWorkDays As Integer
+
+ThisWorkbook.Application.EnableEvents = False
+ThisWorkbook.Application.Calculation = xlCalculationManual
+
+
+With excWkShPARAM
+    dateCalenderStart = CDate(.Cells(intFindRowFirst(excWkShPARAM, 1, "Team Start Date", 1), 2))
+    intMonthRange = .Cells(intFindRowFirst(excWkShPARAM, 1, "Team Months", 1), 2)
+    intRFCWorkDays = .Cells(intFindRowFirst(excWkShPARAM, 1, "RFC Worktime", 1), 2)
+End With
+
+
+intCapacNameCol = intGetColumnByName(excWkShCapac, "RFC Name", 1)
+intColName = intGetColumnByName(excWkShTeamRFCs, "Name", 1)
+intEISCol = intGetColumnByName(excWkShCapac, "RP EIS Date", 1)
+intEffortCol = intGetColumnByName(excWkShCapac, "RFC Effort", 1)
+
+intStartRow = 1
+
+With excWkShCapac
+    Set excRngSort = .Range(.Cells(2, 1), .Cells(25000, 250))
+    Set excRngSortCol = .Range(.Cells(2, intCapacNameCol), .Cells(25000, intCapacNameCol))
+    Set excRngSortCol2 = .Range(.Cells(2, intEISCol), .Cells(25000, intEISCol))
+    Call SortStuff2(excRngSort, excRngSortCol, excRngSortCol2, True)
+End With
+
+
+With excWkShTeamRFCs
+.Activate
+'create dates
+    Set excRangeFind = .Range(.Cells(1, intColName + 1), .Cells(25000, intColName + 500))
+    excRangeFind.ClearContents
+    
+    .Cells(1, intColName).Value = "Name"
+    .Cells(1, intColName + 1) = dateCalenderStart
+
+    For intCol = intColName + 1 To intColName + intMonthRange
+        dateRunningMonth = CDate(.Cells(intStartRow, intCol))
+        .Cells(intStartRow, intCol + 1) = DateSerial(Year(dateRunningMonth), Month(dateRunningMonth) + 1, 1)
+        
+    Next
+
+End With
+
+
+intStartRow = 2
+
+With excWkShTeamRFCs
+
+    i = intStartRow
+    
+    
+    While .Cells(i, intColName) <> "" And i < 100 'walk through the list of names in team RFC list
+        capacStartRow = intFindRowFirst(excWkShCapac, 2, .Cells(i, intColName), intCapacNameCol)
+        k = capacStartRow
+     
+        If capacStartRow <> -1 Then
+            DoEvents
+     
+            While excWkShCapac.Cells(k, intCapacNameCol) = .Cells(i, intColName) And k < 25000  'keep going until name is same
+                
+                'get EIS date in this row
+                If excWkShCapac.Cells(k, intEISCol) <> "" Then
+                    dateEIS = CDate(excWkShCapac.Cells(k, intEISCol))
+                Else
+                    dateEIS = CDate(0)
+                End If
+            
+                While dateEIS <= CDate(.Cells(1, intColName + 1)) And k < 25000 'keep going until the EIS in scope
+                    k = k + 1 'next row in capac
+                    'check EIS date in next row in capac
+                    If excWkShCapac.Cells(k, intEISCol) <> "" Then
+                        dateEIS = CDate(excWkShCapac.Cells(k, intEISCol))
+                    Else
+                        dateEIS = CDate(0)
+                    End If
+                    DoEvents
+          
+                Wend 'EIS in capac plan is in scope
+   
+            
+            
+                j = intColName + 1
+                
+    
+            
+
+                dateStartWork = dateEIS - intRFCWorkDays
+                
+                If dateStartWork < dateCalenderStart Then
+                    dateStartWork = dateCalenderStart
+                End If
+                
+                While DateSerial(Year(dateEIS), Month(dateEIS), 1) <> (.Cells(1, j)) And j < 500 'find date in team plan RFCs
+                    'MsgBox dateEIS & "   " & CDate(.Cells(1, j))
+                    j = j + 1 'next date column in team plan RFCs
+                    DoEvents
+            
+                Wend 'first month in team plan RFCs was found where effort Month1 should be calculated
+                
+                dblEffort1 = (.Cells(1, j) - dateStartWork) / intRFCWorkDays
+
+                j = j - 1 'reset j to the datecolumn found
+          
+
+                If j > intColName + 1 Then
+                    .Cells(i, j) = .Cells(i, j) + dblEffort1 * excWkShCapac.Cells(k, intEffortCol)
+                End If
+                    .Cells(i, j + 1) = .Cells(i, j + 1) + (1 - dblEffort1) * excWkShCapac.Cells(k, intEffortCol)
+        
+
+                DoEvents
+        k = k + 1
+   
+        Wend    'next row in capac plan
+ 
+            
+        End If
+       
+ 
+        i = i + 1 'next person row in team plan RFCs
+
+    
+    Wend
+
+
+End With
+
+
+
+        ThisWorkbook.Application.EnableEvents = True
+        ThisWorkbook.Application.Calculation = xlCalculationAutomatic
+
+
+End Sub
+
+
+Public Sub NameTranslateCAPAC(ByVal excWkShCapac As Object, ByVal excWkShNames As Object)
+'Dim dicRFC As Object
+Dim i As Long
+
+Dim _
+intNameCol As Integer, _
+intRFCOwnerCol As Integer, _
+intRPOwnerCol As Integer, _
+intFirstRow As Double, _
+intRPSummaryCol As Integer
+
+Dim dicNames As New Dictionary
+Set dicNames = CreateObject("Scripting.Dictionary")
+
+dicNames.RemoveAll
+
+
+intFirstRow = intGetFirstNonemptyRow(excWkShNames, 1)
+
+
+If intFirstRow <> -1 Then
+    intNameCol = intGetColumnByName(excWkShNames, "NAMELIST", intFirstRow)
+
+End If
+
+
+
+With excWkShNames
+i = intFirstRow + 1
+    While .Cells(i, intNameCol) <> "" And i < 100
+
+        If Not dicNames.Exists(.Cells(i, intNameCol).Value) Then
+
+            dicNames.Add .Cells(i, intNameCol).Value, .Cells(i, intNameCol + 1).Value
+
+        End If
+        i = i + 1
+
+        DoEvents
+    Wend
+
+End With
+
+
+    
+
+intFirstRow = intGetFirstNonemptyRow(excWkShCapac, 1)
+
+If intFirstRow <> -1 Then
+    intRFCOwnerCol = intGetColumnByName(excWkShCapac, "RFC Name", intFirstRow)
+    intRPOwnerCol = intGetColumnByName(excWkShCapac, "RP requestor", intFirstRow)
+    intRPSummaryCol = intGetColumnByName(excWkShCapac, "RP Summary", intFirstRow)
+End If
+
+
+With excWkShCapac
+.Activate
+    i = intFirstRow + 1
+
+    While .Cells(i, intRPSummaryCol) <> "" And i < 25000
+        If dicNames.Exists(.Cells(i, intRPOwnerCol).Value) Then
+     
+            .Cells(i, intRFCOwnerCol) = dicNames(.Cells(i, intRPOwnerCol).Value)
+            
+        End If
+        
+        If .Cells(i, intRFCOwnerCol) <> "" And .Cells(i, intRPOwnerCol) = "" Then
+
+            .Cells(i, intRFCOwnerCol) = dicNames(.Cells(i, intRFCOwnerCol).Value)
+            .Cells(i, intRPOwnerCol) = .Cells(i, intRFCOwnerCol)
+  
+        End If
+        
+        i = i + 1
+    Wend
+
+End With
+
+
+
+End Sub
+
+
+Public Sub SortStuff2(ByVal excRng As Object, ByVal excColSort As Object, ByVal excColSort2 As Object, ByVal boolAscending As Boolean)
+
+If boolAscending Then
+    excRng.Sort _
+        Key1:=excColSort, _
+        Order1:=xlAscending, _
+        Key2:=excColSort2, _
+        Order2:=xlAscending, _
+        MatchCase:=False, _
+        Dataoption1:=xlSortNormal
+Else
+    excRng.Sort _
+        Key1:=excColSort, _
+        Order1:=xlDescending, _
+        Key2:=excColSort2, _
+        Order2:=xlDescending, _
+        MatchCase:=False, _
+        Dataoption1:=xlSortNormal
+End If
+
+End Sub
+
+
+Public Sub SortStuff(ByVal excRng As Object, ByVal excColSort As Object, ByVal boolAscending As Boolean)
+
+If boolAscending Then
+    excRng.Sort _
+        Key1:=excColSort, _
+        Order1:=xlAscending, _
+        MatchCase:=False, _
+        Dataoption1:=xlSortNormal
+Else
+    excRng.Sort _
+        Key1:=excColSort, _
+        Order1:=xlDescending, _
+        MatchCase:=False, _
+        Dataoption1:=xlSortNormal
+End If
+
+End Sub
